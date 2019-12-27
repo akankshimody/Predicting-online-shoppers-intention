@@ -1,0 +1,110 @@
+---
+title: "Data cleaning and resampling"
+output: html_document
+---
+
+
+
+```{r}
+setwd('F:/MSBA_2020/Summer/Predictive_modelling/Project')
+
+library(dplyr)
+library(naniar)
+library(ISLR)
+library(caret)
+library(ROSE)
+library(tidyverse)
+
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType),
+            Revenue=as.factor(Revenue))
+
+# online_shoppers <- na.omit(online_shoppers)
+
+online_shoppers$missing_values <- apply(online_shoppers, 1, function(x) any(is.na(x)))
+online_shoppers[is.na(online_shoppers)] <- 0
+online_shoppers
+
+online_shoppers <- subset(online_shoppers, select = -19)
+
+```
+
+
+Split training and test sets
+
+```{r}
+set.seed(1)
+train_index <- sample(nrow(online_shoppers), nrow(online_shoppers)*0.7)
+imbal_train = online_shoppers[train_index,]
+imbal_test = online_shoppers[-train_index,]
+```
+
+create different versions of the training set prior to model tuning
+
+1. UnderSampling
+
+```{r}
+set.seed(1)
+down_train <- downSample(x = imbal_train[, -ncol(imbal_train)],
+                         y = imbal_train$Revenue)
+
+new_row1 = as.data.frame(filter(imbal_train, imbal_train$OperatingSystems == 5)[1,])
+new_row2 = as.data.frame(filter(imbal_train, imbal_train$TrafficType == 12)[1,])
+new_row3 = as.data.frame(filter(imbal_train, imbal_train$TrafficType == 19)[1,])
+
+colnames(new_row1)[18] <- 'Class'
+colnames(new_row2)[18] <- 'Class'
+colnames(new_row3)[18] <- 'Class'
+
+down_train = rbind(down_train, new_row1)
+down_train = rbind(down_train, new_row2)
+down_train = rbind(down_train, new_row3)
+down_train <- na.omit(down_train)
+
+table(down_train$Class)
+
+
+```
+
+2. OverSampling 
+```{r}
+set.seed(1)
+up_train <- upSample(x = imbal_train[, -ncol(imbal_train)],
+                     y = imbal_train$Revenue)                         
+
+table(up_train$Class)
+```
+
+3. SMOTE
+```{r}
+library(DMwR)
+set.seed(1)
+smote_train <- SMOTE(Revenue ~ ., 
+                     data  = imbal_train)
+
+# Smote fit teh data such that Weekend column was converted to numeric. Need to change it back to logical
+# filter(smote_train, smote_train$Weekend >= 0.5)$Weekend = TRUE
+# filter(smote_train, smote_train$Weekend < 0.5)$Weekend = FALSE
+
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+
+table(smote_train$Revenue)
+
+```
+
+4. ROSE
+```{r}
+set.seed(1)
+rose_train <- ovun.sample(Revenue ~ ., data = imbal_train, method = "over",N = 14000)$data # 7248(F), 6752(T)              
+table(rose_train$Revenue)
+```
