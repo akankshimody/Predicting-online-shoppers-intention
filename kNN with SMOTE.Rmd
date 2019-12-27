@@ -1,0 +1,107 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+kNN with SMOTE data
+-------------------
+
+```{r SMOTE variation}
+library(class)
+library(kknn)
+library(dplyr)
+library(naniar)
+library(caret)
+library(dplyr)
+library(ISLR)
+library(DMwR)
+data <- read.csv('online_shoppers_intention.csv') %>%
+naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType))
+data$missing_values <- apply(data, 1, function(x) any(is.na(x)))
+data[is.na(data)]<-0
+data <- subset(data, select=-19)
+set.seed(1)
+rand = sample(nrow(data),0.7*nrow(data))
+train = data[rand,]
+test = data[-rand,]
+set.seed(1)
+train$Revenue <- as.factor(train$Revenue)
+smote_train_knn <- SMOTE(Revenue~.,data =train)
+# Smote fit the data such that Weekend column was converted to numeric. Need to change it back to logical
+# filter(smote_train, smote_train$Weekend >= 0.5)$Weekend = TRUE
+# filter(smote_train, smote_train$Weekend < 0.5)$Weekend = FALSE
+temp <- smote_train_knn$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train_knn$Weekend = sapply(temp, as.logical)
+table(smote_train_knn$Revenue)
+smote_train_knn$missing_values <- apply(smote_train_knn, 1, function(x) any(is.na(x)))
+smote_train_knn[is.na(smote_train_knn)]<-0
+test$missing_values <- apply(test, 1, function(x) any(is.na(x)))
+test[is.na(test)]<-0
+smote_train_knn <- subset(smote_train_knn, select=-c(Month,VisitorType,Weekend,missing_values))
+test <- subset(test, select=-c(Month,VisitorType,Weekend,missing_values))
+#Run kNN with the smote dataset
+near <- knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=13)
+tbl = table(test$Revenue,near)
+accuracy = sum(diag(tbl))/sum(tbl)
+overall_accuracy = NULL
+for(i in 1:99){
+  
+  near = knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=i)
+  d = table(test$Revenue,near)
+  accuracy_i = sum(diag(d))/sum(d)
+  
+  overall_accuracy = c(overall_accuracy,accuracy_i)
+}
+plot(overall_accuracy,xlab='K value',ylab='Accuracy',main = 'The optimal number of neighbors',col=4,lwd=2)
+text(20,overall_accuracy[17]+0.0002,paste("k=",17),col=2,cex=1.2)
+best = which.max(overall_accuracy)
+cat('The best k value to use for best accuracy is',best,'.')
+near_best = knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=17)
+tbl_best= table(test$Revenue,near_best)
+accuracy_best = sum(diag(tbl_best))/sum(tbl_best)
+cat('The accuracy when we use k=17 is', round(accuracy_best,4))
+confusionMatrix(tbl_best,positive='TRUE')
+confusionMatrix(tbl,positive='TRUE')
+#Calculate precision, recall, and F1 score for SMOTE model
+precision = (350/(350+549))
+cat('The precision of the kNN model is',precision,'\n')
+recall = 350/566
+cat('The recall of the kNN model is',recall,'\n')
+f1_score = 2*precision*recall/(precision+recall)
+cat('The F1 score of the model is',f1_score,'\n')
+```
+
+Use 10-fold CV with SMOTE data
+
+```{r 10-fold with SMOTE variation}
+library(caret)
+trctrl <- trainControl(method='repeatedcv',number=10,repeats = 10)
+knn_cv <- train(Revenue~.,data = smote_train_knn,method = 'knn', trControl=trctrl)
+```
+
+
+```{r 10-fold with SMOTE variation}
+test_cv <- predict(knn_cv, newdata=test)
+tbl_cv= table(test$Revenue,test_cv)
+accuracy_cv = sum(diag(tbl_cv))/sum(tbl_cv)
+cat('The accuracy for our 10-fold model is ', round(accuracy_cv,4))
+confusionMatrix(tbl_cv,positive='TRUE')
+#Calculate precision, recall, and F1 score for 10-fold model
+precision_cv = 350/(350+598)
+recall_cv = 350/566
+F1_cv = 2*precision_cv*recall_cv/(recall_cv+precision_cv)
+cat('The precision of the 10-fold model is',precision_cv,'\n')
+cat('The recall of the k-fold model is',recall_cv,'\n')
+cat('The F1 score of the 10-fold model is',F1_cv,'\n')
+```
+kNN model with SMOTE training set and 10-fold CV kNN model with SMOTE training set had very similar results. kNN model with the original data had higher accuracy, precision, and lower recall (resulting in a higher F1 score) but our original training set had mostly FALSE classes with a baseline of 85% accuracy if predicted all FALSE.

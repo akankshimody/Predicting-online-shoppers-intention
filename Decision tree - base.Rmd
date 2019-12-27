@@ -1,0 +1,65 @@
+---
+title: "Decision Tree"
+output: html_document
+---
+
+
+                                Decision Tree
+                              ----------------
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(naniar)
+library(tidyr)
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType)) 
+online_shoppers$missing_values <- apply(online_shoppers, 1, function(x) any(is.na(x)))
+online_shoppers[is.na(online_shoppers)] <- 0
+online_shoppers$Revenue = as.factor(online_shoppers$Revenue)
+```
+
+
+Creating SMOTE resampled data
+
+```{r}
+library(DMwR)
+set.seed (2)
+train=sample(1: nrow(online_shoppers), nrow(online_shoppers)*.7)
+os.test=online_shoppers[-train ,]
+smote_train <- SMOTE(Revenue ~ ., data  = online_shoppers, subset=train)
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+temp <- smote_train$missing_values
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$missing_values = sapply(temp, as.logical)
+```
+
+
+Fitting tree on SMOTE resampled data
+```{r}
+library(tree)
+attach(online_shoppers)
+tree_smote <- tree(as.factor(Revenue)~., data=smote_train)
+pred2 = predict(tree_smote , os.test, type="class")
+conf.mat = table(os.test$Revenue, pred2)
+plot(tree_smote, type="uniform")
+text(tree_smote, pretty=1)
+```
+
+Checking to see if pruning the tree improves performance.
+```{r}
+tree3 <- cv.tree(tree_smote, K=10)
+plot(tree3$size, tree3$dev, type="b", main="Analyzing Tree Size Using CV", ylab="Average Total Deviance", xlab="Size")
+```
+

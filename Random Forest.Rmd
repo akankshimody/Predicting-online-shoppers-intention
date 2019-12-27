@@ -1,0 +1,307 @@
+---
+title: "Random forest"
+output: html_document
+---
+
+
+                     RANDOM FOREST. 
+          ----------------------------------
+
+We are not using rebalancing here as RF alogorithm performs bootstrapping
+
+```{r}
+library(dplyr)
+df  <- read.csv('online_shoppers_intention.csv')
+```
+
+```{r}
+df$SpecialDay  <-  as.factor(df$SpecialDay)
+df$OperatingSystems <- as.factor(df$OperatingSystems)
+df$Browser <- as.factor(df$Browser)
+df$Region <- as.factor(df$Region)
+df$TrafficType <- as.factor(df$TrafficType)
+df <- data.frame(na.omit(df))
+df = distinct(df)
+
+```
+
+
+Train Test split & Selection of number of variables to proceed
+
+```{r}
+
+library(randomForest)
+set.seed(1)
+index <- sample(1:nrow(df), size = 3*nrow(df)/4)
+training <- df[index,]
+testing <- df[-index,]
+
+test_accuracy=c()
+
+for(i in 3:ncol(df)-1){
+  rf.model=randomForest(Revenue~.,data=training,mtry=i,importance=T,ntree=100)
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>0.5,1,0)
+  test_accuracy=rbind(test_accuracy,mean((tree.pred==testing[,'Revenue'])))
+}
+
+plot(3:ncol(df)-1,test_accuracy,type='b')
+
+```
+
+
+
+Analysis of probabilities
+
+```{r}
+rf7.model=randomForest(Revenue~.,data=training,mtry=7,importance=T,ntree=500)
+v7_prediction=predict(rf7.model,testing)
+v7_prediction1 <- data.frame(v7_prediction)
+v7_prediction1$perc <-ntile(v7_prediction1[,1],100)
+head(v7_prediction1)
+
+comp <- data.frame(cbind(testing$Revenue, v7_prediction1$v7_prediction))
+summary(comp%>%filter(comp[,1]==1))
+summary(comp%>%filter(comp[,1]==0))
+summary(comp%>%filter(comp[,1]==0))
+varImpPlot(rf.model)
+plot(rf.model)
+
+require(knitr)
+kable(importance(rf.model))
+
+df1 <- df
+df1$Revenue  <- as.factor(df1$Revenue)
+training1 <- df1[index,]
+testing1 <- df1[-index,]
+
+```
+
+
+
+RF regression with mtry=3
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training,mtry=3,importance=T,ntree=100)
+test_accuracy_3=c()
+recall_3=c()
+specificity_3=c()
+precision_3=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_3=rbind(test_accuracy_3,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_3 = data.frame(table(tree.pred, testing$Revenue))
+  recall_3 = rbind(recall_3,round(cf_m_3%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_3 = rbind(specificity_3,round(cf_m_3%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_3%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_3 = rbind(precision_3,round(cf_m_3%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3%>%filter(tree.pred=="1")%>%pull(Freq)),2))    
+}
+
+df_3 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_3, recall_3, specificity_3, precision_3))
+colnames(df_3) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_3$f_score = round(2*df_3$Recall*df_3$Precision/(df_3$Recall+df_3$Precision),2)
+
+plot(seq(0.1,0.9,0.1),df_3$f_score,type='b')
+
+
+```
+
+
+RF regression with mtry=7
+
+```{r}
+
+rf.model=randomForest(Revenue~.,data=training,mtry=7,importance=T,ntree=100)
+test_accuracy_7=c()
+recall_7=c()
+specificity_7=c()
+precision_7=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_7=rbind(test_accuracy_7,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_7 = data.frame(table(tree.pred, testing$Revenue))
+  recall_7 = rbind(recall_7,round(cf_m_7%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_7 = rbind(specificity_7,round(cf_m_7%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_7%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_7 = rbind(precision_7,round(cf_m_7%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7%>%filter(tree.pred=="1")%>%pull(Freq)),2))    
+}
+
+df_7 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_7, recall_7, specificity_7, precision_7))
+colnames(df_7) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_7$f_score = round(2*df_7$Recall*df_7$Precision/(df_7$Recall+df_7$Precision),2)
+plot(seq(0.1,0.9,0.1),df_7$f_score,type='b',xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Regression RF with mtry=8 
+
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training,mtry=8,importance=T,ntree=100)
+test_accuracy_8=c()
+recall_8=c()
+specificity_8=c()
+precision_8=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_8=rbind(test_accuracy_8,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_8 = data.frame(table(tree.pred, testing$Revenue))
+  recall_8 = rbind(recall_8,round(cf_m_8%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_8 = rbind(specificity_8,round(cf_m_8%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_8%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_8 = rbind(precision_8,round(cf_m_8%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8%>%filter(tree.pred=="1")%>%pull(Freq)),2))  
+}
+
+df_8 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_8, recall_8, specificity_8, precision_8))
+colnames(df_8) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_8$f_score = round(2*df_8$Recall*df_8$Precision/(df_8$Recall+df_8$Precision),2)
+
+plot(seq(0.1,0.9,0.1),df_8$f_score,type='b',xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Classification mtry
+
+```{r}
+test_accuracy_classification=c()
+
+for(i in 3:ncol(df)-1){
+  rf.model=randomForest(Revenue~.,data=training1,mtry=i,importance=T,ntree=100)
+  tree.pred=predict(rf.model,testing1)
+  test_accuracy_classification=rbind(test_accuracy_classification,mean((tree.pred==testing1[,'Revenue'])))
+}
+
+plot(3:ncol(df)-1,test_accuracy_classification,type='b', xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Classification RF with mtry = 3
+
+```{r}
+
+rf.model=randomForest(Revenue~.,data=training1,mtry=3,importance=T,ntree=100)
+test_accuracy_3_classification=c()
+recall_3_classification=c()
+specificity_3_classification=c()
+precision_3_classification=c()
+f_3_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_3_classification=rbind(test_accuracy_3_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_3_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_3_classification = 2*precision_3_classification*recall_3_classification/(precision_3_classification+recall_3_classification)
+
+df_3_classification <- data.frame(cbind(test_accuracy_3_classification, recall_3_classification, specificity_3_classification, precision_3_classification, f_3_classification))
+colnames(df_3_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_3_classification
+
+```
+
+
+Classification RF with mtry = 7
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training1,mtry=7,importance=T,ntree=100)
+test_accuracy_7_classification=c()
+recall_7_classification=c()
+specificity_7_classification=c()
+precision_7_classification=c()
+f_7_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_7_classification=rbind(test_accuracy_7_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_7_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_7_classification = 2*precision_7_classification*recall_7_classification/(precision_7_classification+recall_7_classification)
+
+df_7_classification <- data.frame(cbind(test_accuracy_7_classification, recall_7_classification, specificity_7_classification, precision_7_classification, f_7_classification))
+colnames(df_7_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_7_classification
+
+```
+
+
+Classification RF with mtry = 8
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training1,mtry=8,importance=T,ntree=100)
+test_accuracy_8_classification=c()
+recall_8_classification=c()
+specificity_8_classification=c()
+precision_8_classification=c()
+f_8_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_8_classification=rbind(test_accuracy_8_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_8_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_8_classification = 2*precision_8_classification*recall_8_classification/(precision_8_classification+recall_8_classification)
+
+df_8_classification <- data.frame(test_accuracy_8_classification, recall_8_classification, specificity_8_classification, precision_8_classification, f_8_classification)
+colnames(df_8_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_8_classification
+
+
+```
+
+
+```{r}
+library(ROCR)
+
+rf_output=randomForest(Revenue~.,data=training1,mtry=7,importance=T,ntree=100)
+
+predictions=as.vector(rf_output$votes[,2])
+pred=prediction(predictions,training1$Revenue)
+
+perf_AUC=performance(pred,"auc") #Calculate the AUC value
+AUC=perf_AUC@y.values[[1]]
+
+perf_ROC=performance(pred,"tpr","fpr") #plot the actual ROC curve
+plot(perf_ROC, main="ROC plot")
+text(0.5,0.5,paste("AUC = ",format(AUC, digits=5, scientific=FALSE)))
+
+```
+
+
+
+
+```{r}
+
+rf_output=randomForest(Revenue~.,data=training1,mtry=8,importance=T,ntree=100)
+
+predictions=as.vector(rf_output$votes[,2])
+pred=prediction(predictions,training1$Revenue)
+
+perf_AUC=performance(pred,"auc") #Calculate the AUC value
+AUC=perf_AUC@y.values[[1]]
+
+perf_ROC=performance(pred,"tpr","fpr") #plot the actual ROC curve
+plot(perf_ROC, main="ROC plot")
+text(0.5,0.5,paste("AUC = ",format(AUC, digits=5, scientific=FALSE)))
+
+```
+
+
+Classification Variable importance
+
+```{r}
+
+varImpPlot(rf.model)
+
+```

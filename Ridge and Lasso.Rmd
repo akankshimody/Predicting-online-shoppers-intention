@@ -1,0 +1,129 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+                                                Ridge and Lasso
+                                                ---------------
+
+```{r}
+rm(list=ls())
+setwd("F:/MSBA_2020/Summer/Predictive_modelling/Project")
+
+
+library(dplyr)
+library(naniar)
+```
+
+
+```{r}
+library(dplyr)
+library(naniar)
+library(ISLR)
+library(caret)
+library(ROSE)
+library(tidyverse)
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType),
+            Revenue=as.factor(Revenue))
+online_shoppers <- na.omit(online_shoppers)
+attach(online_shoppers)
+names(online_shoppers)
+
+```
+
+
+Training and test set
+
+```{r}
+
+set.seed(1)
+train_index <- sample(nrow(online_shoppers), nrow(online_shoppers)*0.7)
+imbal_train = online_shoppers[train_index,]
+imbal_test = online_shoppers[-train_index,]
+train.data = imbal_train
+test.data = imbal_test
+
+```
+
+
+SMOTE
+```{r}
+library(DMwR)
+set.seed(1)
+smote_train <- SMOTE(Revenue~. ,data  = imbal_train)
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+```
+
+
+LASSO Regression
+
+```{r}
+# Dummy code categorical predictor variables
+x <- model.matrix(Revenue~., smote_train)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- smote_train$Revenue
+library (glmnet)
+grid =10^ seq (10,-2, length =100)
+set.seed(1)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+#cv.lasso$lambda.min
+##coef(cv.lasso, cv.lasso$lambda.min)
+# Final model with lambda.min
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+# Make prediction on test data
+x.test <- model.matrix(Revenue~., imbal_test)[,-1]
+probabilities <- lasso.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, TRUE, FALSE)
+# Model accuracy
+observed.classes <- imbal_test$Revenue
+mean(predicted.classes == observed.classes)
+coef(lasso.model,cv.lasso$lambda.min)
+confusionMatrix(table(predicted.classes, observed.classes), positive = "TRUE")
+roc.curve(observed.classes, predicted.classes, main="Lasso")
+```
+
+
+RIDGE Regression
+
+```{r}
+# Dummy code categorical predictor variables
+x <- model.matrix(Revenue~., smote_train)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- smote_train$Revenue
+library (glmnet)
+grid =10^ seq (10,-2, length =100)
+set.seed(1)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial")
+plot(cv.ridge)
+##cv.ridge$lambda.min
+##coef(cv.ridge, cv.ridge$lambda.min)
+# Final model with lambda.min
+ridge.model <- glmnet(x, y, alpha = 0, family = "binomial",
+                      lambda = cv.ridge$lambda.min)
+# Make prediction on test data
+x.test <- model.matrix(Revenue ~., imbal_test)[,-1]
+probabilities <- ridge.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, TRUE, FALSE)
+# Model accuracy
+observed.classes <- imbal_test$Revenue
+mean(predicted.classes == observed.classes)
+coef(ridge.model,cv.ridge$lambda.min)
+confusionMatrix(table(predicted.classes, observed.classes), positive = "TRUE")
+roc.curve(observed.classes, predicted.classes, main="Ridge")
+
+
+
+```

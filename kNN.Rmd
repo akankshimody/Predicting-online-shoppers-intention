@@ -1,0 +1,68 @@
+---
+title: "kNN"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+                          K Nearest Neighbors
+                          -------------------
+                          
+
+Running 10-fold CV using decision tree and SMOTE resampling.
+```{r}
+library(ROSE)
+library(plyr)
+library(rpart)
+set.seed(1)
+form <- "Revenue ~."
+folds <- split(online_shoppers, cut(sample(1:nrow(online_shoppers)),10))
+errs <- rep(NA, length(folds))
+precision <- rep(NA, length(folds))
+sensitivity<- rep(NA, length(folds))
+specificity <- rep(NA, length(folds))
+fscore <- rep(NA, length(folds))
+test_auc <- rep(NA, length(folds))
+
+for (i in 1:length(folds)) {
+  test <- ldply(folds[i], data.frame)
+  train <- ldply(folds[-i], data.frame)
+  train = train[-1]
+  #train$Weekend = as.factor(train$Weekend)
+  #train$missing_values = as.factor(train$missing_values)
+  #train$Revenue = as.factor(train$Revenue)
+  smote_train <- SMOTE(Revenue ~ ., 
+                       data  = train)
+  temp <- smote_train$Weekend
+  temp[temp >= 0.5] = TRUE
+  temp[temp < 0.5] = FALSE
+  smote_train$Weekend = sapply(temp, as.logical)
+  temp <- smote_train$missing_values
+  temp[temp >= 0.5] = TRUE
+  temp[temp < 0.5] = FALSE
+  smote_train$missing_values = sapply(temp, as.logical)
+  tmp.model <- tree(form , data=smote_train)
+  tmp.predict <- predict(tmp.model, newdata = test, type = "class")
+  conf.mat <- table(test$Revenue, tmp.predict)
+  print(conf.mat)
+  errs[i] <- 1-sum(diag(conf.mat))/sum(conf.mat)
+  precision[i] <- conf.mat[2,2]/(conf.mat[2,2]+conf.mat[1,2])
+  sensitivity[i] <- conf.mat[2,2]/(conf.mat[2,2]+conf.mat[2,1])
+  specificity[i] <- conf.mat[1,1]/(conf.mat[1,1]+conf.mat[1,2])
+  fscore[i] <- 2*precision[i]*sensitivity[i]/(precision[i]+sensitivity[i])
+  test_auc[i] <- roc.curve(test$Revenue, tmp.predict)$auc
+}
+
+print(sprintf("average accuracy: %.3f", 1-mean(errs)))
+print(sprintf("average precision: %.3f", mean(precision)))
+print(sprintf("average sensitivity: %.3f", mean(sensitivity)))
+print(sprintf("average specificity: %.3f", mean(specificity)))
+print(sprintf("average fscore: %.3f", mean(fscore)))
+print(sprintf("average auc: %.3f", mean(test_auc)))
+```
+
+
+
+

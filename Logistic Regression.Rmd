@@ -1,0 +1,127 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Model for undersampled training data
+
+
+```{r}
+
+under.model = glm(Class ~ ., data=down_train, family='binomial')
+summary(under.model)
+predictions.under.train <- predict(under.model,newdata = down_train, type="response")
+pred <- rep(FALSE, nrow(down_train))
+pred[predictions.under.train > 0.5] = TRUE
+Observed = down_train$Class
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train Undersample ROC")
+
+```
+
+
+Cross Validation with UnderSampled
+
+```{r}
+
+ctrl <- trainControl(method='repeatedcv', number = 10, savePredictions = TRUE)
+mod_fit <- train(Class ~ ., data=down_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+
+```
+
+```{r}
+
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train Undersample ROC")
+
+
+```
+
+
+
+Model on oversampled training data from within
+
+```{r}
+
+over.model = glm(Class ~ ., data=up_train, family='binomial')
+summary(over.model)
+predictions.over.train <- predict(over.model,newdata = up_train, type="response")
+pred <- rep(FALSE, nrow(up_train))
+pred[predictions.over.train > 0.5] = TRUE
+Observed = up_train$Class
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train OverSample ROC")
+
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Class ~ ., data=up_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train Oversample ROC")
+
+```
+
+
+
+
+
+Model on training data resampled with SMOTE
+
+```{r}
+smote.model = glm(Revenue ~ ., data=smote_train, family='binomial')
+summary(smote.model)
+predictions.smote.train <- predict(smote.model,newdata = smote_train, type="response")
+pred <- rep(FALSE, nrow(smote_train))
+pred[predictions.smote.train > 0.5] = TRUE
+Observed = smote_train$Revenue
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train SMOTE ROC")
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Revenue ~ ., data=smote_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train SMOTE ROC")
+```
+
+```{r}
+summary(mod_fit)
+
+```
+
+
+
+
+Model on training data resampled with ROSE
+
+```{r}
+rose.model = glm(Revenue ~ ., data=rose_train, family='binomial')
+summary(rose.model)
+predictions.rose.train <- predict(rose.model,newdata = rose_train, type="response")
+pred <- rep(FALSE, nrow(rose_train))
+pred[predictions.rose.train > 0.5] = TRUE
+Observed = rose_train$Revenue
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train ROSE ROC")
+
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Revenue ~ ., data=rose_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train ROSE ROC")
+```
+
+
+Clearly SMOTE gave the best results for Logistic regression.
