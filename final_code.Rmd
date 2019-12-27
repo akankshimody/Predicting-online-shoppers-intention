@@ -1,0 +1,963 @@
+---
+title: "Project"
+output: html_document
+---
+
+```{r}
+setwd('F:/MSBA_2020/Summer/Predictive_modelling/Project')
+
+library(dplyr)
+library(naniar)
+library(ISLR)
+library(caret)
+library(ROSE)
+library(tidyverse)
+
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType),
+            Revenue=as.factor(Revenue))
+
+# online_shoppers <- na.omit(online_shoppers)
+
+online_shoppers$missing_values <- apply(online_shoppers, 1, function(x) any(is.na(x)))
+online_shoppers[is.na(online_shoppers)] <- 0
+online_shoppers
+
+online_shoppers <- subset(online_shoppers, select = -19)
+
+```
+
+
+Split training and test sets
+
+```{r}
+set.seed(1)
+train_index <- sample(nrow(online_shoppers), nrow(online_shoppers)*0.7)
+imbal_train = online_shoppers[train_index,]
+imbal_test = online_shoppers[-train_index,]
+```
+
+create different versions of the training set prior to model tuning
+
+1. UnderSampling
+
+```{r}
+set.seed(1)
+down_train <- downSample(x = imbal_train[, -ncol(imbal_train)],
+                         y = imbal_train$Revenue)
+
+new_row1 = as.data.frame(filter(imbal_train, imbal_train$OperatingSystems == 5)[1,])
+new_row2 = as.data.frame(filter(imbal_train, imbal_train$TrafficType == 12)[1,])
+new_row3 = as.data.frame(filter(imbal_train, imbal_train$TrafficType == 19)[1,])
+
+colnames(new_row1)[18] <- 'Class'
+colnames(new_row2)[18] <- 'Class'
+colnames(new_row3)[18] <- 'Class'
+
+down_train = rbind(down_train, new_row1)
+down_train = rbind(down_train, new_row2)
+down_train = rbind(down_train, new_row3)
+down_train <- na.omit(down_train)
+
+table(down_train$Class)
+
+
+```
+
+2. OverSampling 
+```{r}
+set.seed(1)
+up_train <- upSample(x = imbal_train[, -ncol(imbal_train)],
+                     y = imbal_train$Revenue)                         
+
+table(up_train$Class)
+```
+
+3. SMOTE
+```{r}
+library(DMwR)
+set.seed(1)
+smote_train <- SMOTE(Revenue ~ ., 
+                     data  = imbal_train)
+
+# Smote fit teh data such that Weekend column was converted to numeric. Need to change it back to logical
+# filter(smote_train, smote_train$Weekend >= 0.5)$Weekend = TRUE
+# filter(smote_train, smote_train$Weekend < 0.5)$Weekend = FALSE
+
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+
+table(smote_train$Revenue)
+
+```
+
+4. ROSE
+```{r}
+set.seed(1)
+rose_train <- ovun.sample(Revenue ~ ., data = imbal_train, method = "over",N = 14000)$data # 7248(F), 6752(T)              
+table(rose_train$Revenue)
+```
+
+Model for original training data
+```{r}
+original.model = glm(Revenue ~ ., data=imbal_train, family='binomial')
+summary(original.model)
+predictions.orig.train <- predict(original.model,newdata = imbal_train, type="response")
+pred <- rep(FALSE, nrow(imbal_train))
+pred[predictions.orig.train > 0.2] = TRUE
+Observed = imbal_train$Revenue
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train Original Data ROC")
+
+```
+
+
+
+                      Evaluating the different Resample methods
+                      -----------------------------------------
+
+
+
+Model for undersampled training data
+
+
+```{r}
+
+under.model = glm(Class ~ ., data=down_train, family='binomial')
+summary(under.model)
+predictions.under.train <- predict(under.model,newdata = down_train, type="response")
+pred <- rep(FALSE, nrow(down_train))
+pred[predictions.under.train > 0.5] = TRUE
+Observed = down_train$Class
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train Undersample ROC")
+
+```
+
+
+Cross Validation with UnderSampled
+
+```{r}
+
+ctrl <- trainControl(method='repeatedcv', number = 10, savePredictions = TRUE)
+mod_fit <- train(Class ~ ., data=down_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+
+```
+
+```{r}
+
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train Undersample ROC")
+
+
+```
+
+
+
+
+
+
+
+
+Model on oversampled training data from within
+
+```{r}
+
+over.model = glm(Class ~ ., data=up_train, family='binomial')
+summary(over.model)
+predictions.over.train <- predict(over.model,newdata = up_train, type="response")
+pred <- rep(FALSE, nrow(up_train))
+pred[predictions.over.train > 0.5] = TRUE
+Observed = up_train$Class
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train OverSample ROC")
+
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Class ~ ., data=up_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train Oversample ROC")
+
+```
+
+
+
+
+
+
+
+
+Model on training data resampled with SMOTE
+
+```{r}
+smote.model = glm(Revenue ~ ., data=smote_train, family='binomial')
+summary(smote.model)
+predictions.smote.train <- predict(smote.model,newdata = smote_train, type="response")
+pred <- rep(FALSE, nrow(smote_train))
+pred[predictions.smote.train > 0.5] = TRUE
+Observed = smote_train$Revenue
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train SMOTE ROC")
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Revenue ~ ., data=smote_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train SMOTE ROC")
+```
+
+```{r}
+summary(mod_fit)
+
+```
+
+
+
+
+Model on training data resampled with ROSE
+
+```{r}
+rose.model = glm(Revenue ~ ., data=rose_train, family='binomial')
+summary(rose.model)
+predictions.rose.train <- predict(rose.model,newdata = rose_train, type="response")
+pred <- rep(FALSE, nrow(rose_train))
+pred[predictions.rose.train > 0.5] = TRUE
+Observed = rose_train$Revenue
+confusionMatrix(table(pred, Observed), positive = "TRUE")
+roc.curve(Observed, pred, main="Train ROSE ROC")
+
+```
+
+Cross Validation
+```{r}
+mod_fit <- train(Revenue ~ ., data=rose_train, method='glm', family="binomial",trControl = ctrl, tuneLength = 5)
+predictions = mod_fit$pred$pred
+observed = mod_fit$pred$obs
+confusionMatrix(table(predictions, observed), positive = "TRUE")
+roc.curve(observed, predictions, main="Train ROSE ROC")
+```
+
+
+Clearly SMOTE gave the best results for Logistic regression.
+
+
+
+
+
+                                                Ridge and Lasso
+                                                ---------------
+
+```{r}
+rm(list=ls())
+setwd("F:/MSBA_2020/Summer/Predictive_modelling/Project")
+
+
+library(dplyr)
+library(naniar)
+```
+
+
+```{r}
+library(dplyr)
+library(naniar)
+library(ISLR)
+library(caret)
+library(ROSE)
+library(tidyverse)
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType),
+            Revenue=as.factor(Revenue))
+online_shoppers <- na.omit(online_shoppers)
+attach(online_shoppers)
+names(online_shoppers)
+
+```
+
+
+Training and test set
+
+```{r}
+
+set.seed(1)
+train_index <- sample(nrow(online_shoppers), nrow(online_shoppers)*0.7)
+imbal_train = online_shoppers[train_index,]
+imbal_test = online_shoppers[-train_index,]
+train.data = imbal_train
+test.data = imbal_test
+
+```
+
+
+SMOTE
+```{r}
+library(DMwR)
+set.seed(1)
+smote_train <- SMOTE(Revenue~. ,data  = imbal_train)
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+```
+
+
+LASSO Regression
+
+```{r}
+# Dummy code categorical predictor variables
+x <- model.matrix(Revenue~., smote_train)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- smote_train$Revenue
+library (glmnet)
+grid =10^ seq (10,-2, length =100)
+set.seed(1)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+plot(cv.lasso)
+#cv.lasso$lambda.min
+##coef(cv.lasso, cv.lasso$lambda.min)
+# Final model with lambda.min
+lasso.model <- glmnet(x, y, alpha = 1, family = "binomial",
+                      lambda = cv.lasso$lambda.min)
+# Make prediction on test data
+x.test <- model.matrix(Revenue~., imbal_test)[,-1]
+probabilities <- lasso.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, TRUE, FALSE)
+# Model accuracy
+observed.classes <- imbal_test$Revenue
+mean(predicted.classes == observed.classes)
+coef(lasso.model,cv.lasso$lambda.min)
+confusionMatrix(table(predicted.classes, observed.classes), positive = "TRUE")
+roc.curve(observed.classes, predicted.classes, main="Lasso")
+```
+
+
+RIDGE Regression
+
+```{r}
+# Dummy code categorical predictor variables
+x <- model.matrix(Revenue~., smote_train)[,-1]
+# Convert the outcome (class) to a numerical variable
+y <- smote_train$Revenue
+library (glmnet)
+grid =10^ seq (10,-2, length =100)
+set.seed(1)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial")
+plot(cv.ridge)
+##cv.ridge$lambda.min
+##coef(cv.ridge, cv.ridge$lambda.min)
+# Final model with lambda.min
+ridge.model <- glmnet(x, y, alpha = 0, family = "binomial",
+                      lambda = cv.ridge$lambda.min)
+# Make prediction on test data
+x.test <- model.matrix(Revenue ~., imbal_test)[,-1]
+probabilities <- ridge.model %>% predict(newx = x.test)
+predicted.classes <- ifelse(probabilities > 0.5, TRUE, FALSE)
+# Model accuracy
+observed.classes <- imbal_test$Revenue
+mean(predicted.classes == observed.classes)
+coef(ridge.model,cv.ridge$lambda.min)
+confusionMatrix(table(predicted.classes, observed.classes), positive = "TRUE")
+roc.curve(observed.classes, predicted.classes, main="Ridge")
+
+
+
+```
+
+
+
+
+
+                                Decision Tree
+                              ----------------
+
+```{r}
+rm(list=ls())
+library(dplyr)
+library(naniar)
+library(tidyr)
+online_shoppers <- read.csv("online_shoppers_intention.csv") %>%
+  naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType)) 
+online_shoppers$missing_values <- apply(online_shoppers, 1, function(x) any(is.na(x)))
+online_shoppers[is.na(online_shoppers)] <- 0
+online_shoppers$Revenue = as.factor(online_shoppers$Revenue)
+```
+
+
+Creating SMOTE resampled data
+
+```{r}
+library(DMwR)
+set.seed (2)
+train=sample(1: nrow(online_shoppers), nrow(online_shoppers)*.7)
+os.test=online_shoppers[-train ,]
+smote_train <- SMOTE(Revenue ~ ., data  = online_shoppers, subset=train)
+temp <- smote_train$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$Weekend = sapply(temp, as.logical)
+temp <- smote_train$missing_values
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train$missing_values = sapply(temp, as.logical)
+```
+
+
+Fitting tree on SMOTE resampled data
+```{r}
+library(tree)
+attach(online_shoppers)
+tree_smote <- tree(as.factor(Revenue)~., data=smote_train)
+pred2 = predict(tree_smote , os.test, type="class")
+conf.mat = table(os.test$Revenue, pred2)
+plot(tree_smote, type="uniform")
+text(tree_smote, pretty=1)
+```
+
+Checking to see if pruning the tree improves performance.
+```{r}
+tree3 <- cv.tree(tree_smote, K=10)
+plot(tree3$size, tree3$dev, type="b", main="Analyzing Tree Size Using CV", ylab="Average Total Deviance", xlab="Size")
+```
+
+
+                          K Nearest Neighbors
+                          -------------------
+                          
+
+Running 10-fold CV using decision tree and SMOTE resampling.
+```{r}
+library(ROSE)
+library(plyr)
+library(rpart)
+set.seed(1)
+form <- "Revenue ~."
+folds <- split(online_shoppers, cut(sample(1:nrow(online_shoppers)),10))
+errs <- rep(NA, length(folds))
+precision <- rep(NA, length(folds))
+sensitivity<- rep(NA, length(folds))
+specificity <- rep(NA, length(folds))
+fscore <- rep(NA, length(folds))
+test_auc <- rep(NA, length(folds))
+for (i in 1:length(folds)) {
+  test <- ldply(folds[i], data.frame)
+  train <- ldply(folds[-i], data.frame)
+  train = train[-1]
+  #train$Weekend = as.factor(train$Weekend)
+  #train$missing_values = as.factor(train$missing_values)
+  #train$Revenue = as.factor(train$Revenue)
+  smote_train <- SMOTE(Revenue ~ ., 
+                       data  = train)
+  temp <- smote_train$Weekend
+  temp[temp >= 0.5] = TRUE
+  temp[temp < 0.5] = FALSE
+  smote_train$Weekend = sapply(temp, as.logical)
+  temp <- smote_train$missing_values
+  temp[temp >= 0.5] = TRUE
+  temp[temp < 0.5] = FALSE
+  smote_train$missing_values = sapply(temp, as.logical)
+  tmp.model <- tree(form , data=smote_train)
+  tmp.predict <- predict(tmp.model, newdata = test, type = "class")
+  conf.mat <- table(test$Revenue, tmp.predict)
+  print(conf.mat)
+  errs[i] <- 1-sum(diag(conf.mat))/sum(conf.mat)
+  precision[i] <- conf.mat[2,2]/(conf.mat[2,2]+conf.mat[1,2])
+  sensitivity[i] <- conf.mat[2,2]/(conf.mat[2,2]+conf.mat[2,1])
+  specificity[i] <- conf.mat[1,1]/(conf.mat[1,1]+conf.mat[1,2])
+  fscore[i] <- 2*precision[i]*sensitivity[i]/(precision[i]+sensitivity[i])
+  test_auc[i] <- roc.curve(test$Revenue, tmp.predict)$auc
+}
+print(sprintf("average accuracy: %.3f", 1-mean(errs)))
+print(sprintf("average precision: %.3f", mean(precision)))
+print(sprintf("average sensitivity: %.3f", mean(sensitivity)))
+print(sprintf("average specificity: %.3f", mean(specificity)))
+print(sprintf("average fscore: %.3f", mean(fscore)))
+print(sprintf("average auc: %.3f", mean(test_auc)))
+```
+
+
+
+
+
+
+kNN with SMOTE data
+-------------------
+
+```{r SMOTE variation}
+library(class)
+library(kknn)
+library(dplyr)
+library(naniar)
+library(caret)
+library(dplyr)
+library(ISLR)
+library(DMwR)
+data <- read.csv('online_shoppers_intention.csv') %>%
+naniar::replace_with_na_at(.vars = c("Administrative", "Administrative_Duration", 
+                                       "Informational", "Informational_Duration", 
+                                       "ProductRelated", "ProductRelated_Duration"), 
+                             condition = ~.x == -1) %>%
+  
+  transform(OperatingSystems=as.factor(OperatingSystems),
+            Browser=as.factor(Browser), 
+            Region=as.factor(Region),
+            TrafficType=as.factor(TrafficType))
+data$missing_values <- apply(data, 1, function(x) any(is.na(x)))
+data[is.na(data)]<-0
+data <- subset(data, select=-19)
+set.seed(1)
+rand = sample(nrow(data),0.7*nrow(data))
+train = data[rand,]
+test = data[-rand,]
+set.seed(1)
+train$Revenue <- as.factor(train$Revenue)
+smote_train_knn <- SMOTE(Revenue~.,data =train)
+# Smote fit the data such that Weekend column was converted to numeric. Need to change it back to logical
+# filter(smote_train, smote_train$Weekend >= 0.5)$Weekend = TRUE
+# filter(smote_train, smote_train$Weekend < 0.5)$Weekend = FALSE
+temp <- smote_train_knn$Weekend
+temp[temp >= 0.5] = TRUE
+temp[temp < 0.5] = FALSE
+smote_train_knn$Weekend = sapply(temp, as.logical)
+table(smote_train_knn$Revenue)
+smote_train_knn$missing_values <- apply(smote_train_knn, 1, function(x) any(is.na(x)))
+smote_train_knn[is.na(smote_train_knn)]<-0
+test$missing_values <- apply(test, 1, function(x) any(is.na(x)))
+test[is.na(test)]<-0
+smote_train_knn <- subset(smote_train_knn, select=-c(Month,VisitorType,Weekend,missing_values))
+test <- subset(test, select=-c(Month,VisitorType,Weekend,missing_values))
+#Run kNN with the smote dataset
+near <- knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=13)
+tbl = table(test$Revenue,near)
+accuracy = sum(diag(tbl))/sum(tbl)
+overall_accuracy = NULL
+for(i in 1:99){
+  
+  near = knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=i)
+  d = table(test$Revenue,near)
+  accuracy_i = sum(diag(d))/sum(d)
+  
+  overall_accuracy = c(overall_accuracy,accuracy_i)
+}
+plot(overall_accuracy,xlab='K value',ylab='Accuracy',main = 'The optimal number of neighbors',col=4,lwd=2)
+text(20,overall_accuracy[17]+0.0002,paste("k=",17),col=2,cex=1.2)
+best = which.max(overall_accuracy)
+cat('The best k value to use for best accuracy is',best,'.')
+near_best = knn(smote_train_knn[,1:14],test[,1:14],cl=smote_train_knn$Revenue,k=17)
+tbl_best= table(test$Revenue,near_best)
+accuracy_best = sum(diag(tbl_best))/sum(tbl_best)
+cat('The accuracy when we use k=17 is', round(accuracy_best,4))
+confusionMatrix(tbl_best,positive='TRUE')
+confusionMatrix(tbl,positive='TRUE')
+#Calculate precision, recall, and F1 score for SMOTE model
+precision = (350/(350+549))
+cat('The precision of the kNN model is',precision,'\n')
+recall = 350/566
+cat('The recall of the kNN model is',recall,'\n')
+f1_score = 2*precision*recall/(precision+recall)
+cat('The F1 score of the model is',f1_score,'\n')
+```
+
+Use 10-fold CV with SMOTE data
+
+```{r 10-fold with SMOTE variation}
+library(caret)
+trctrl <- trainControl(method='repeatedcv',number=10,repeats = 10)
+knn_cv <- train(Revenue~.,data = smote_train_knn,method = 'knn', trControl=trctrl)
+```
+
+
+```{r 10-fold with SMOTE variation}
+test_cv <- predict(knn_cv, newdata=test)
+tbl_cv= table(test$Revenue,test_cv)
+accuracy_cv = sum(diag(tbl_cv))/sum(tbl_cv)
+cat('The accuracy for our 10-fold model is ', round(accuracy_cv,4))
+confusionMatrix(tbl_cv,positive='TRUE')
+#Calculate precision, recall, and F1 score for 10-fold model
+precision_cv = 350/(350+598)
+recall_cv = 350/566
+F1_cv = 2*precision_cv*recall_cv/(recall_cv+precision_cv)
+cat('The precision of the 10-fold model is',precision_cv,'\n')
+cat('The recall of the k-fold model is',recall_cv,'\n')
+cat('The F1 score of the 10-fold model is',F1_cv,'\n')
+```
+kNN model with SMOTE training set and 10-fold CV kNN model with SMOTE training set had very similar results. kNN model with the original data had higher accuracy, precision, and lower recall (resulting in a higher F1 score) but our original training set had mostly FALSE classes with a baseline of 85% accuracy if predicted all FALSE.
+
+
+
+
+
+
+
+
+                     RANDOM FOREST. 
+          ----------------------------------
+
+We are not using rebalancing here as RF alogorithm performs bootstrapping
+
+```{r}
+library(dplyr)
+df  <- read.csv('online_shoppers_intention.csv')
+```
+
+```{r}
+df$SpecialDay  <-  as.factor(df$SpecialDay)
+df$OperatingSystems <- as.factor(df$OperatingSystems)
+df$Browser <- as.factor(df$Browser)
+df$Region <- as.factor(df$Region)
+df$TrafficType <- as.factor(df$TrafficType)
+df <- data.frame(na.omit(df))
+df = distinct(df)
+
+```
+
+
+Train Test split & Selection of number of variables to proceed
+
+```{r}
+
+library(randomForest)
+set.seed(1)
+index <- sample(1:nrow(df), size = 3*nrow(df)/4)
+training <- df[index,]
+testing <- df[-index,]
+
+test_accuracy=c()
+
+for(i in 3:ncol(df)-1){
+  rf.model=randomForest(Revenue~.,data=training,mtry=i,importance=T,ntree=100)
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>0.5,1,0)
+  test_accuracy=rbind(test_accuracy,mean((tree.pred==testing[,'Revenue'])))
+}
+
+plot(3:ncol(df)-1,test_accuracy,type='b')
+
+```
+
+
+
+Analysis of probabilities
+
+```{r}
+rf7.model=randomForest(Revenue~.,data=training,mtry=7,importance=T,ntree=500)
+v7_prediction=predict(rf7.model,testing)
+v7_prediction1 <- data.frame(v7_prediction)
+v7_prediction1$perc <-ntile(v7_prediction1[,1],100)
+head(v7_prediction1)
+
+comp <- data.frame(cbind(testing$Revenue, v7_prediction1$v7_prediction))
+summary(comp%>%filter(comp[,1]==1))
+summary(comp%>%filter(comp[,1]==0))
+summary(comp%>%filter(comp[,1]==0))
+varImpPlot(rf.model)
+plot(rf.model)
+
+require(knitr)
+kable(importance(rf.model))
+
+df1 <- df
+df1$Revenue  <- as.factor(df1$Revenue)
+training1 <- df1[index,]
+testing1 <- df1[-index,]
+
+```
+
+
+
+RF regression with mtry=3
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training,mtry=3,importance=T,ntree=100)
+test_accuracy_3=c()
+recall_3=c()
+specificity_3=c()
+precision_3=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_3=rbind(test_accuracy_3,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_3 = data.frame(table(tree.pred, testing$Revenue))
+  recall_3 = rbind(recall_3,round(cf_m_3%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_3 = rbind(specificity_3,round(cf_m_3%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_3%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_3 = rbind(precision_3,round(cf_m_3%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3%>%filter(tree.pred=="1")%>%pull(Freq)),2))    
+}
+
+df_3 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_3, recall_3, specificity_3, precision_3))
+colnames(df_3) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_3$f_score = round(2*df_3$Recall*df_3$Precision/(df_3$Recall+df_3$Precision),2)
+
+plot(seq(0.1,0.9,0.1),df_3$f_score,type='b')
+
+
+```
+
+
+RF regression with mtry=7
+
+```{r}
+
+rf.model=randomForest(Revenue~.,data=training,mtry=7,importance=T,ntree=100)
+test_accuracy_7=c()
+recall_7=c()
+specificity_7=c()
+precision_7=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_7=rbind(test_accuracy_7,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_7 = data.frame(table(tree.pred, testing$Revenue))
+  recall_7 = rbind(recall_7,round(cf_m_7%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_7 = rbind(specificity_7,round(cf_m_7%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_7%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_7 = rbind(precision_7,round(cf_m_7%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7%>%filter(tree.pred=="1")%>%pull(Freq)),2))    
+}
+
+df_7 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_7, recall_7, specificity_7, precision_7))
+colnames(df_7) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_7$f_score = round(2*df_7$Recall*df_7$Precision/(df_7$Recall+df_7$Precision),2)
+plot(seq(0.1,0.9,0.1),df_7$f_score,type='b',xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Regression RF with mtry=8 
+
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training,mtry=8,importance=T,ntree=100)
+test_accuracy_8=c()
+recall_8=c()
+specificity_8=c()
+precision_8=c()
+
+for(i in seq(0.1,0.9,0.1)){
+  tree.pred=predict(rf.model,testing)
+  tree.pred=ifelse(tree.pred>i,1,0)
+  test_accuracy_8=rbind(test_accuracy_8,mean((tree.pred==testing[,'Revenue'])))
+  cf_m_8 = data.frame(table(tree.pred, testing$Revenue))
+  recall_8 = rbind(recall_8,round(cf_m_8%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8%>%filter(Var2=="TRUE")%>%pull(Freq)),2))
+  specificity_8 = rbind(specificity_8,round(cf_m_8%>%filter((tree.pred==0)&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_8%>%filter(Var2=="FALSE")%>%pull(Freq)),2))
+  precision_8 = rbind(precision_8,round(cf_m_8%>%filter((tree.pred==1)&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8%>%filter(tree.pred=="1")%>%pull(Freq)),2))  
+}
+
+df_8 <- data.frame(cbind(matrix(seq(0.1,0.9,0.1)), test_accuracy_8, recall_8, specificity_8, precision_8))
+colnames(df_8) <- c("Cutoff","Accuracy","Recall","Specificity", "Precision")
+df_8$f_score = round(2*df_8$Recall*df_8$Precision/(df_8$Recall+df_8$Precision),2)
+
+plot(seq(0.1,0.9,0.1),df_8$f_score,type='b',xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Classification mtry
+
+```{r}
+test_accuracy_classification=c()
+
+for(i in 3:ncol(df)-1){
+  rf.model=randomForest(Revenue~.,data=training1,mtry=i,importance=T,ntree=100)
+  tree.pred=predict(rf.model,testing1)
+  test_accuracy_classification=rbind(test_accuracy_classification,mean((tree.pred==testing1[,'Revenue'])))
+}
+
+plot(3:ncol(df)-1,test_accuracy_classification,type='b', xlab="Cutoff",ylab="F1 Score")
+
+```
+
+
+Classification RF with mtry = 3
+
+```{r}
+
+rf.model=randomForest(Revenue~.,data=training1,mtry=3,importance=T,ntree=100)
+test_accuracy_3_classification=c()
+recall_3_classification=c()
+specificity_3_classification=c()
+precision_3_classification=c()
+f_3_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_3_classification=rbind(test_accuracy_3_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_3_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_3_classification = round(cf_m_3_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_3_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_3_classification = 2*precision_3_classification*recall_3_classification/(precision_3_classification+recall_3_classification)
+
+df_3_classification <- data.frame(cbind(test_accuracy_3_classification, recall_3_classification, specificity_3_classification, precision_3_classification, f_3_classification))
+colnames(df_3_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_3_classification
+
+```
+
+
+Classification RF with mtry = 7
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training1,mtry=7,importance=T,ntree=100)
+test_accuracy_7_classification=c()
+recall_7_classification=c()
+specificity_7_classification=c()
+precision_7_classification=c()
+f_7_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_7_classification=rbind(test_accuracy_7_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_7_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_7_classification = round(cf_m_7_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_7_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_7_classification = 2*precision_7_classification*recall_7_classification/(precision_7_classification+recall_7_classification)
+
+df_7_classification <- data.frame(cbind(test_accuracy_7_classification, recall_7_classification, specificity_7_classification, precision_7_classification, f_7_classification))
+colnames(df_7_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_7_classification
+
+```
+
+
+Classification RF with mtry = 8
+
+```{r}
+rf.model=randomForest(Revenue~.,data=training1,mtry=8,importance=T,ntree=100)
+test_accuracy_8_classification=c()
+recall_8_classification=c()
+specificity_8_classification=c()
+precision_8_classification=c()
+f_8_classification=c()
+
+tree.pred=predict(rf.model,testing1)
+test_accuracy_8_classification=rbind(test_accuracy_8_classification,mean((tree.pred==testing1[,'Revenue'])))
+cf_m_8_classification = data.frame(table(tree.pred, testing1$Revenue))
+recall_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(Var2=="TRUE")%>%pull(Freq)),2)
+specificity_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="FALSE")&(Var2=="FALSE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(Var2=="FALSE")%>%pull(Freq)),2)
+precision_8_classification = round(cf_m_8_classification%>%filter((tree.pred=="TRUE")&(Var2=="TRUE"))%>%pull(Freq)/sum(cf_m_8_classification%>%filter(tree.pred=="TRUE")%>%pull(Freq)),2)
+f_8_classification = 2*precision_8_classification*recall_8_classification/(precision_8_classification+recall_8_classification)
+
+df_8_classification <- data.frame(test_accuracy_8_classification, recall_8_classification, specificity_8_classification, precision_8_classification, f_8_classification)
+colnames(df_8_classification) <- c("Accuracy","Recall","Specificity", "Precision","F-Score")
+
+df_8_classification
+
+
+```
+
+
+```{r}
+library(ROCR)
+
+rf_output=randomForest(Revenue~.,data=training1,mtry=7,importance=T,ntree=100)
+
+predictions=as.vector(rf_output$votes[,2])
+pred=prediction(predictions,training1$Revenue)
+
+perf_AUC=performance(pred,"auc") #Calculate the AUC value
+AUC=perf_AUC@y.values[[1]]
+
+perf_ROC=performance(pred,"tpr","fpr") #plot the actual ROC curve
+plot(perf_ROC, main="ROC plot")
+text(0.5,0.5,paste("AUC = ",format(AUC, digits=5, scientific=FALSE)))
+
+```
+
+
+
+
+```{r}
+
+rf_output=randomForest(Revenue~.,data=training1,mtry=8,importance=T,ntree=100)
+
+predictions=as.vector(rf_output$votes[,2])
+pred=prediction(predictions,training1$Revenue)
+
+perf_AUC=performance(pred,"auc") #Calculate the AUC value
+AUC=perf_AUC@y.values[[1]]
+
+perf_ROC=performance(pred,"tpr","fpr") #plot the actual ROC curve
+plot(perf_ROC, main="ROC plot")
+text(0.5,0.5,paste("AUC = ",format(AUC, digits=5, scientific=FALSE)))
+
+```
+
+
+Classification Variable importance
+
+```{r}
+
+varImpPlot(rf.model)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
