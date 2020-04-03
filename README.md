@@ -1,6 +1,6 @@
 # Predicting Online Shopper Intention
 
-This project was completed as part of the Predictive Modeling Course during the MSBA Program at UT Austin.
+This project was completed as part of the Predictive Modeling Course during the MSBA Program at UT Austin.<br>
 Team members: Akankshi Mody, Apoorv Mehrotra, Grant Zhong, Jacob Padden and Sachin Balakrishnan
 
 ## Introduction
